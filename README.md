@@ -19,36 +19,36 @@
 <table>
 <tr>
 <td align="center" width="33%">
-<img src="./docs/images/权限卡片2.jpg" width="240" /><br/>
+<img src="./docs/images/permission-confirm.jpg" width="240" /><br/>
 <b>权限确认</b><br/>
-<sub>允许 / 拒绝 / 会话允许 / 全局允许</sub>
+<sub>允许 / 拒绝 / 会话允许 / 全局允许 + 输入框<br/>脚注：项目名 · 终端标识(fifo) · 会话时长</sub>
 </td>
 <td align="center" width="33%">
-<img src="./docs/images/权限卡片1.jpg" width="240" /><br/>
+<img src="./docs/images/permission-options.jpg" width="240" /><br/>
 <b>权限选项</b><br/>
-<sub>ExitPlanMode 等工具的选项按钮</sub>
+<sub>ExitPlanMode 等工具选项按钮 + 输入框<br/>脚注：项目名 · 终端标识(fifo) · 会话时长</sub>
 </td>
 <td align="center" width="33%">
-<img src="./docs/images/方案选择.jpg" width="240" /><br/>
+<img src="./docs/images/ask-user-question.jpg" width="240" /><br/>
 <b>方案选择</b><br/>
-<sub>AskUserQuestion 动态选项 + 自由输入</sub>
+<sub>AskUserQuestion 动态选项 + Other + 自由输入<br/>脚注：项目名 · 终端标识(fifo) · 时间戳</sub>
 </td>
 </tr>
 <tr>
 <td align="center" width="33%">
-<img src="./docs/images/执行卡片.jpg" width="240" /><br/>
+<img src="./docs/images/live-execution.jpg" width="240" /><br/>
 <b>实时执行摘要</b><br/>
-<sub>工具调用实时推送，同任务原地更新</sub>
+<sub>工具调用表格 · 同任务原地 patch 更新<br/>脚注：项目名 · 时间戳</sub>
 </td>
 <td align="center" width="33%">
-<img src="./docs/images/完成卡片1.jpg" width="240" /><br/>
+<img src="./docs/images/task-complete.jpg" width="240" /><br/>
 <b>任务完成</b><br/>
-<sub>改动总结 + 输入框续聊</sub>
+<sub>改动总结 + 输入框续聊<br/>脚注：项目名 · 会话时长 · Token 用量统计</sub>
 </td>
 <td align="center" width="33%">
-<img src="./docs/images/完成卡片2.jpg" width="240" /><br/>
+<img src="./docs/images/task-complete-stats.jpg" width="240" /><br/>
 <b>完成通知（带统计）</b><br/>
-<sub>Token 用量 / 时长 / 测试结果</sub>
+<sub>测试结果表格 + 输入框续聊<br/>脚注：项目名 · 会话时长 · Token 用量统计</sub>
 </td>
 </tr>
 </table>
