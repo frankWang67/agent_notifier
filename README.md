@@ -25,16 +25,21 @@
 </td>
 <td align="center" width="33%">
 <img src="./docs/images/权限卡片1.jpg" width="240" /><br/>
-<b>方案选择</b><br/>
-<sub>动态选项按钮 + 自由输入</sub>
+<b>权限选项</b><br/>
+<sub>ExitPlanMode 等工具的选项按钮</sub>
 </td>
+<td align="center" width="33%">
+<img src="./docs/images/方案选择.jpg" width="240" /><br/>
+<b>方案选择</b><br/>
+<sub>AskUserQuestion 动态选项 + 自由输入</sub>
+</td>
+</tr>
+<tr>
 <td align="center" width="33%">
 <img src="./docs/images/执行卡片.jpg" width="240" /><br/>
 <b>实时执行摘要</b><br/>
 <sub>工具调用实时推送，同任务原地更新</sub>
 </td>
-</tr>
-<tr>
 <td align="center" width="33%">
 <img src="./docs/images/完成卡片1.jpg" width="240" /><br/>
 <b>任务完成</b><br/>
@@ -44,8 +49,6 @@
 <img src="./docs/images/完成卡片2.jpg" width="240" /><br/>
 <b>完成通知（带统计）</b><br/>
 <sub>Token 用量 / 时长 / 测试结果</sub>
-</td>
-<td align="center" width="33%">
 </td>
 </tr>
 </table>
