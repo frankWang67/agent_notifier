@@ -345,10 +345,10 @@ class FeishuListener {
 
             const qResponses = {};
             q.options.forEach((opt, optIdx) => {
-                qResponses[`opt_${optIdx}`] = { keys: ARROW_DOWN.repeat(optIdx) + '\n', label: opt.label };
+                qResponses[`opt_${optIdx}`] = { keys: ARROW_DOWN.repeat(optIdx) + '\r', label: opt.label };
             });
-            qResponses['opt_other'] = { keys: ARROW_DOWN.repeat(otherIdx) + '\n', label: 'Other' };
-            qResponses['_other_num'] = { keys: ARROW_DOWN.repeat(otherIdx) + '\n', label: '_meta' };
+            qResponses['opt_other'] = { keys: ARROW_DOWN.repeat(otherIdx) + '\r', label: 'Other' };
+            qResponses['_other_num'] = { keys: ARROW_DOWN.repeat(otherIdx) + '\r', label: '_meta' };
             qResponses['interrupt'] = { keys: '\x1b', label: '⛔ Interrupt' };
 
             // 保存 state（沿用多问题元数据）
@@ -406,30 +406,12 @@ class FeishuListener {
                 console.error(`[feishu-listener] 发送 Q${nextIdx + 1} 卡片失败:`, err.message);
             }
         } else {
-            // 所有问题已回答，发送提交/取消卡片
-            const confirmKey = `${baseKey}_confirm`;
-            this.state.addNotification(confirmKey, {
-                session_id: notification.session_id,
-                notification_type: notification.notification_type,
-                pts_device: notification.pts_device,
-                created_at: Date.now(),
-                responses: { 'allow': { keys: '\n', label: '已提交' }, 'deny': { keys: '\x1b', label: '已取消' }, 'interrupt': { keys: '\x1b', label: '⛔ Interrupt' } },
-            });
-
-            const confirmCard = {
+            // 所有问题已回答 — 所有答案在逐题 Enter 时已注入终端，此处仅发状态通知
+            // 不存 sessionState、不带注入按钮，避免多注入一个 Enter 到错误上下文
+            const doneCard = {
                 config: { wide_screen_mode: true },
-                header: { title: { tag: 'plain_text', content: `✅ 全部回答完毕 (${totalQ} 题)` }, template: 'green' },
+                header: { title: { tag: 'plain_text', content: `✅ 全部已回答 (${totalQ} 题)` }, template: 'green' },
                 elements: [
-                    { tag: 'div', text: { tag: 'lark_md', content: '点击提交确认，或取消放弃' } },
-                    { tag: 'action', actions: [
-                        { tag: 'button', text: { tag: 'plain_text', content: '📤 提交' }, type: 'primary',
-                          value: { action_type: 'allow', session_state_key: confirmKey } },
-                        { tag: 'button', text: { tag: 'plain_text', content: '❌ 取消' }, type: 'danger',
-                          value: { action_type: 'deny', session_state_key: confirmKey } },
-                        { tag: 'button', text: { tag: 'plain_text', content: '⛔ ESC' }, type: 'danger', size: 'small',
-                          value: { action_type: 'interrupt', session_state_key: confirmKey } },
-                    ]},
-                    { tag: 'hr' },
                     { tag: 'markdown', content: noteParts },
                 ],
             };
@@ -437,11 +419,11 @@ class FeishuListener {
             try {
                 await this.client.im.message.create({
                     params: { receive_id_type: 'chat_id' },
-                    data: { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(confirmCard) },
+                    data: { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(doneCard) },
                 });
-                console.log('[feishu-listener] 已发送提交确认卡片');
+                console.log('[feishu-listener] 已发送多问题完成通知');
             } catch (err) {
-                console.error('[feishu-listener] 发送确认卡片失败:', err.message);
+                console.error('[feishu-listener] 发送完成通知失败:', err.message);
             }
         }
     }
