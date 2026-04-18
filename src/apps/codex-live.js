@@ -5,6 +5,7 @@ const path = require('node:path');
 
 require('../lib/env-config');
 const { createFeishuClient } = require('../channels/feishu/feishu-client');
+const { resolveFeishuChatId } = require('../channels/feishu/resolve-chat-id');
 const { sessionState } = require('../lib/session-state');
 const { buildCodexFooter, normalizeTokenUsage } = require('./codex-card-footer');
 
@@ -55,9 +56,8 @@ function normalizeCodexLiveEntry(entry) {
 function shouldCreateNewCard(previous, next) {
     const prevKey = String(previous?.assistantKey || '').trim();
     const nextKey = String(next?.assistantKey || '').trim();
-    if (!nextKey) return true;
     if (!previous) return true;
-    if (!prevKey) return true;
+    if (!prevKey || !nextKey) return false;
     return prevKey !== nextKey;
 }
 
@@ -75,20 +75,34 @@ function hasStructuredStep(entry) {
     return !!(entry?.tool || entry?.input || entry?.result);
 }
 
+function buildStepFallbackSummary(entries) {
+    const steps = Array.isArray(entries) ? entries : [];
+    if (!steps.length) return null;
+    const labels = steps.slice(0, 3).map((entry) => {
+        const tool = entry?.tool || '步骤';
+        const input = String(entry?.input || '').trim();
+        if (!input) return tool;
+        return `${tool} ${input}`;
+    });
+    const suffix = steps.length > 3 ? ` 等 ${steps.length} 步` : '';
+    return `正在执行：${labels.join('；')}${suffix}`;
+}
+
 function buildCodexLiveCard({ entries, projectName, ptsDevice = null, phase = null, inputStateKey = null }) {
     const safeEntries = Array.isArray(entries) ? entries : [];
-    const lastWithOutput = [...safeEntries].reverse().find((entry) => entry.output);
-    const codexOutput = lastWithOutput?.output || null;
-    const resolvedPhase = phase || lastWithOutput?.phase || safeEntries[safeEntries.length - 1]?.phase || null;
+    const outputEntries = safeEntries.filter((entry) => String(entry?.output || '').trim());
+    const structuredEntries = safeEntries.filter(hasStructuredStep);
+    const lastOutputEntry = getLastOutputEntry(safeEntries);
+    const resolvedPhase = phase || lastOutputEntry?.phase || safeEntries[safeEntries.length - 1]?.phase || null;
     const resolvedPtsDevice = ptsDevice || safeEntries[safeEntries.length - 1]?.ptsDevice || null;
     const lastWithTokens = [...safeEntries].reverse().find((entry) => entry.tokens);
     const resolvedTokens = lastWithTokens?.tokens || null;
     const lastWithDuration = [...safeEntries].reverse().find((entry) => entry.turnStartedAt);
     const resolvedStartedAt = lastWithDuration?.turnStartedAt || null;
     const resolvedEndedAt = safeEntries[safeEntries.length - 1]?.ts || Date.now();
-    const showSteps = safeEntries.some(hasStructuredStep);
+    const showSteps = structuredEntries.length > 0;
 
-    const stepRows = safeEntries.map((entry, index) => ({
+    const stepRows = structuredEntries.map((entry, index) => ({
         tag: 'column_set',
         flex_mode: 'none',
         horizontal_spacing: 'small',
@@ -119,13 +133,22 @@ function buildCodexLiveCard({ entries, projectName, ptsDevice = null, phase = nu
     }));
 
     const elements = [];
-    if (codexOutput) {
-        const chunks = splitOutputBlocks(codexOutput);
-        chunks.forEach((chunk, index) => {
-            const prefix = index === 0 ? '💬 **Codex**:\n' : '💬 **Codex（续）**:\n';
-            elements.push({ tag: 'div', text: { tag: 'lark_md', content: `${prefix}${chunk}` } });
+    if (outputEntries.length > 0) {
+        outputEntries.forEach((entry, outputIndex) => {
+            const chunks = splitOutputBlocks(entry.output);
+            chunks.forEach((chunk, chunkIndex) => {
+                const isFirst = outputIndex === 0 && chunkIndex === 0;
+                const prefix = isFirst ? '💬 **Codex**:\n' : '💬 **Codex（续）**:\n';
+                elements.push({ tag: 'div', text: { tag: 'lark_md', content: `${prefix}${chunk}` } });
+            });
         });
         if (showSteps) {
+            elements.push({ tag: 'hr' });
+        }
+    } else if (showSteps) {
+        const fallbackSummary = buildStepFallbackSummary(structuredEntries);
+        if (fallbackSummary) {
+            elements.push({ tag: 'div', text: { tag: 'lark_md', content: `💬 **Codex**:\n${fallbackSummary}` } });
             elements.push({ tag: 'hr' });
         }
     }
@@ -142,7 +165,7 @@ function buildCodexLiveCard({ entries, projectName, ptsDevice = null, phase = nu
             ],
         });
         elements.push({ tag: 'hr' });
-        elements.push(...stepRows.filter(hasStructuredStep));
+        elements.push(...stepRows);
     }
     if (inputStateKey) {
         elements.push({
@@ -167,14 +190,26 @@ function buildCodexLiveCard({ entries, projectName, ptsDevice = null, phase = nu
 
     const isFinal = resolvedPhase === 'final_answer';
 
+    const stepCount = structuredEntries.length;
+    const liveTitle = showSteps
+        ? `⚡ 执行摘要（${stepCount} 步）`
+        : '⚡ 执行摘要';
+
     return {
         config: { wide_screen_mode: true },
         header: {
-            title: { tag: 'plain_text', content: isFinal ? '✅ 已完成' : `⚡ 执行摘要（${showSteps ? stepRows.filter(hasStructuredStep).length : 1} 步）` },
+            title: { tag: 'plain_text', content: isFinal ? '✅ 已完成' : liveTitle },
             template: isFinal ? 'green' : 'blue',
         },
         elements,
     };
+}
+
+function getLastOutputEntry(entries) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+        if (String(entries[i]?.output || '').trim()) return entries[i];
+    }
+    return null;
 }
 
 async function flushBuffer(bufferPath) {
@@ -214,8 +249,14 @@ async function flushBuffer(bufferPath) {
 
     const appId = process.env.FEISHU_APP_ID;
     const appSecret = process.env.FEISHU_APP_SECRET;
-    const chatId = process.env.FEISHU_CHAT_ID;
-    if (!appId || !appSecret || !chatId) return;
+    if (!appId || !appSecret) return;
+
+    const client = createFeishuClient({ appId, appSecret });
+    const chatId = await resolveFeishuChatId({
+        preferredChatId: process.env.FEISHU_CHAT_ID,
+        larkClient: client.client,
+    });
+    if (!chatId) return;
 
     const sessionKey = path.basename(bufferPath, '.jsonl').replace('codex-live-', '');
     sessionState.load();
@@ -246,8 +287,6 @@ async function flushBuffer(bufferPath) {
         phase: latest.phase || existing?.phase || null,
         inputStateKey: ptsDevice ? inputStateKey : null,
     });
-    const client = createFeishuClient({ appId, appSecret });
-
     if (!createNew && existing?.message_id) {
         try {
             await client.patchCard({ messageId: existing.message_id, card });

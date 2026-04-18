@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   parseSessionLine,
   recoverStateFromContent,
+  selectSessionCandidate,
 } = require('../../src/apps/codex-session-watcher');
 
 test('parseSessionLine tracks turn id from turn_context', () => {
@@ -91,10 +92,68 @@ test('parseSessionLine emits assistant output_text with current turn id', () => 
   assert.deepEqual(result.entry, {
     text: '第一段\n第二段',
     assistantKey: 'turn-abc',
+    icon: '💬',
     phase: 'commentary',
     turnStartedAt: '2026-04-07T10:00:00.000Z',
     tokens: { input: 1234, cached: 345, output: 56, total: 1290 },
   });
+});
+
+test('parseSessionLine emits tool step from function_call and keeps call mapping', () => {
+  const result = parseSessionLine(
+    JSON.stringify({
+      type: 'response_item',
+      payload: {
+        type: 'function_call',
+        name: 'exec_command',
+        call_id: 'call_123',
+        arguments: JSON.stringify({ cmd: 'rtk git status' }),
+      },
+    }),
+    {
+      turnId: 'turn-abc',
+      callMap: {},
+    }
+  );
+
+  assert.equal(result.entry?.assistantKey, 'turn-abc');
+  assert.equal(result.entry?.tool, 'exec_command');
+  assert.equal(result.entry?.input, 'rtk git status');
+  assert.equal(result.entry?.result, null);
+  assert.deepEqual(result.state.callMap, {
+    call_123: {
+      name: 'exec_command',
+      input: 'rtk git status',
+    },
+  });
+});
+
+test('parseSessionLine emits tool result from function_call_output', () => {
+  const result = parseSessionLine(
+    JSON.stringify({
+      type: 'response_item',
+      payload: {
+        type: 'function_call_output',
+        call_id: 'call_123',
+        output: 'Process exited with code 0\nOutput:\nok',
+      },
+    }),
+    {
+      turnId: 'turn-abc',
+      callMap: {
+        call_123: {
+          name: 'exec_command',
+          input: 'rtk git status',
+        },
+      },
+    }
+  );
+
+  assert.equal(result.entry?.assistantKey, 'turn-abc');
+  assert.equal(result.entry?.tool, 'exec_command');
+  assert.equal(result.entry?.input, 'rtk git status');
+  assert.equal(result.entry?.result, '退出码 0');
+  assert.deepEqual(result.state.callMap, {});
 });
 
 test('parseSessionLine ignores non assistant response items and event_msg mirror rows', () => {
@@ -132,4 +191,42 @@ test('recoverStateFromContent restores latest turn id from existing session tail
   ].join('\n'));
 
   assert.equal(state.turnId, 'turn-new');
+});
+
+test('selectSessionCandidate prefers same cwd and closest start time', () => {
+  const target = {
+    cwd: '/repo/a',
+    processStartMs: Date.parse('2026-04-18T07:10:00.000Z'),
+  };
+  const candidates = [
+    {
+      path: '/s/1.jsonl',
+      mtimeMs: 100,
+      meta: { cwd: '/repo/b', timestampMs: Date.parse('2026-04-18T07:10:05.000Z') },
+    },
+    {
+      path: '/s/2.jsonl',
+      mtimeMs: 200,
+      meta: { cwd: '/repo/a', timestampMs: Date.parse('2026-04-18T07:10:20.000Z') },
+    },
+    {
+      path: '/s/3.jsonl',
+      mtimeMs: 300,
+      meta: { cwd: '/repo/a', timestampMs: Date.parse('2026-04-18T07:11:30.000Z') },
+    },
+  ];
+
+  const selected = selectSessionCandidate(candidates, target);
+  assert.equal(selected.path, '/s/2.jsonl');
+});
+
+test('selectSessionCandidate falls back to newest mtime when no match metadata', () => {
+  const selected = selectSessionCandidate(
+    [
+      { path: '/s/old.jsonl', mtimeMs: 100, meta: null },
+      { path: '/s/new.jsonl', mtimeMs: 300, meta: null },
+    ],
+    { cwd: '/repo/a', processStartMs: Date.now() }
+  );
+  assert.equal(selected.path, '/s/new.jsonl');
 });

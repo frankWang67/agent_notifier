@@ -37,6 +37,10 @@ test('assistant key change creates new card', () => {
     shouldCreateNewCard(null, { assistantKey: 'a' }),
     true
   );
+  assert.equal(
+    shouldCreateNewCard({ assistantKey: 'a' }, { assistantKey: '' }),
+    false
+  );
 });
 
 test('buildCodexLiveCard renders Claude-style summary card', () => {
@@ -70,6 +74,49 @@ test('buildCodexLiveCard renders Claude-style summary card', () => {
   );
 });
 
+test('buildCodexLiveCard renders structured step rows and correct step count', () => {
+  const card = buildCodexLiveCard({
+    entries: [{
+      tool: 'exec_command',
+      icon: '⚡',
+      input: 'rtk git status',
+      result: '退出码 0',
+      phase: 'commentary',
+    }],
+    projectName: 'demo',
+    phase: 'commentary',
+  });
+
+  assert.equal(card.header.title.content, '⚡ 执行摘要（1 步）');
+  const dataRow = card.elements.find((el) =>
+    el.tag === 'column_set' &&
+    el.columns?.[0]?.elements?.[0]?.text?.content === '1'
+  );
+  assert.ok(dataRow, '应渲染步骤数据行');
+});
+
+test('buildCodexLiveCard renders fallback summary when only steps exist', () => {
+  const card = buildCodexLiveCard({
+    entries: [{
+      tool: 'exec_command',
+      icon: '⚡',
+      input: 'rtk git status',
+      result: null,
+      phase: 'commentary',
+    }],
+    projectName: 'demo',
+    phase: 'commentary',
+  });
+
+  const summaryBlock = card.elements.find((el) =>
+    el.tag === 'div' &&
+    typeof el.text?.content === 'string' &&
+    el.text.content.includes('**Codex**')
+  );
+  assert.ok(summaryBlock, '应渲染兜底概要段');
+  assert.ok(summaryBlock.text.content.includes('正在执行'));
+});
+
 test('buildCodexLiveCard does not render fake step table for output-only entries', () => {
   const card = buildCodexLiveCard({
     entries: [{
@@ -85,6 +132,27 @@ test('buildCodexLiveCard does not render fake step table for output-only entries
     el.columns?.some((col) => col.elements?.some((item) => item.text?.content === '工具'))
   );
   assert.equal(headerRow, undefined);
+  assert.equal(card.header.title.content, '⚡ 执行摘要');
+});
+
+test('buildCodexLiveCard appends multiple outputs in the same turn', () => {
+  const card = buildCodexLiveCard({
+    entries: [
+      { icon: '💬', output: '第一段输出' },
+      { icon: '💬', output: '第二段输出' },
+    ],
+    projectName: 'demo',
+    phase: 'commentary',
+  });
+
+  const codexBlocks = card.elements.filter((el) =>
+    el.tag === 'div' &&
+    typeof el.text?.content === 'string' &&
+    el.text.content.includes('**Codex')
+  );
+  assert.equal(codexBlocks.length, 2);
+  assert.ok(codexBlocks[0].text.content.includes('第一段输出'));
+  assert.ok(codexBlocks[1].text.content.includes('第二段输出'));
 });
 
 test('buildCodexLiveCard uses green completion card for final answer', () => {
