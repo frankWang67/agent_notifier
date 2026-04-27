@@ -56,6 +56,7 @@ function normalizeCodexLiveEntry(entry) {
 function shouldCreateNewCard(previous, next) {
     const prevKey = String(previous?.assistantKey || '').trim();
     const nextKey = String(next?.assistantKey || '').trim();
+    if (next?.phase === 'final_answer') return true;
     if (!previous) return true;
     if (!prevKey || !nextKey) return false;
     return prevKey !== nextKey;

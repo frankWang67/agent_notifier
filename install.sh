@@ -206,7 +206,7 @@ claude() {
 # ── Codex CLI PTY 中继（由 claude-notifier 安装脚本注入） ──
 codex() {
     local CODEX_BIN_CMD="${CODEX_BIN:-codex}"
-    if [[ -z "$TMUX" && -z "$PTY_RELAY_ACTIVE" ]]; then
+    if [[ -z "$PTY_RELAY_ACTIVE" ]]; then
         PTY_RELAY_ACTIVE=1 python3 __INSTALL_DIR__/bin/pty-relay.py "$CODEX_BIN_CMD" "$@"
     else
         command "$CODEX_BIN_CMD" "$@"

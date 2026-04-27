@@ -45,7 +45,127 @@ function normalizeBlock(block) {
         return '';
     }
 
-    return block.replace(ANSI_PATTERN, '').replace(/\r\n/g, '\n');
+    const cleaned = block
+        .replace(OSC_PATTERN, '')
+        .replace(CSI_PATTERN, '')
+        .replace(/\u001b[@-Z\\-_]/g, '')
+        .replace(ANSI_PATTERN, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+    if (!block.includes('\x1b')) return cleaned;
+
+    const screen = renderTerminalScreen(block);
+    return screen || cleaned;
+}
+
+function renderTerminalScreen(text) {
+    const rows = Array.from({ length: 80 }, () => []);
+    const WIDE_PLACEHOLDER = Symbol('wide-placeholder');
+    let row = 0;
+    let col = 0;
+    let i = 0;
+
+    function charWidth(ch) {
+        const cp = ch.codePointAt(0);
+        if (!cp) return 0;
+        if (cp >= 0x0300 && cp <= 0x036f) return 0;
+        if (
+            (cp >= 0x1100 && cp <= 0x115f) ||
+            (cp >= 0x2329 && cp <= 0x232a) ||
+            (cp >= 0x2e80 && cp <= 0xa4cf) ||
+            (cp >= 0xac00 && cp <= 0xd7a3) ||
+            (cp >= 0xf900 && cp <= 0xfaff) ||
+            (cp >= 0xfe10 && cp <= 0xfe19) ||
+            (cp >= 0xfe30 && cp <= 0xfe6f) ||
+            (cp >= 0xff00 && cp <= 0xff60) ||
+            (cp >= 0xffe0 && cp <= 0xffe6)
+        ) {
+            return 2;
+        }
+        return 1;
+    }
+
+    function setCell(ch) {
+        if (row < 0 || row >= rows.length || col < 0) return;
+        rows[row][col] = ch;
+        const width = charWidth(ch);
+        if (width > 1) {
+            rows[row][col + 1] = WIDE_PLACEHOLDER;
+        }
+        col += Math.max(width, 1);
+    }
+
+    while (i < text.length) {
+        const ch = text[i];
+        if (ch === '\x1b') {
+            if (text[i + 1] === '[') {
+                const match = text.slice(i).match(/^\x1b\[([0-9;?]*)([ -/]*)([@-~])/);
+                if (match) {
+                    const params = match[1].replace(/^\?/, '').split(';').filter(Boolean).map((n) => parseInt(n, 10));
+                    const final = match[3];
+                    if (final === 'H' || final === 'f') {
+                        row = Math.max(0, (params[0] || 1) - 1);
+                        col = Math.max(0, (params[1] || 1) - 1);
+                    } else if (final === 'G') {
+                        col = Math.max(0, (params[0] || 1) - 1);
+                    } else if (final === 'A') {
+                        row = Math.max(0, row - (params[0] || 1));
+                    } else if (final === 'B') {
+                        row = Math.min(rows.length - 1, row + (params[0] || 1));
+                    } else if (final === 'C') {
+                        col += params[0] || 1;
+                    } else if (final === 'D') {
+                        col = Math.max(0, col - (params[0] || 1));
+                    } else if (final === 'K') {
+                        rows[row] = rows[row].slice(0, col);
+                    } else if (final === 'J' && (params[0] || 0) === 2) {
+                        for (let r = 0; r < rows.length; r += 1) rows[r] = [];
+                        row = 0;
+                        col = 0;
+                    }
+                    i += match[0].length;
+                    continue;
+                }
+            }
+            if (text[i + 1] === ']') {
+                const endBell = text.indexOf('\x07', i + 2);
+                const endSt = text.indexOf('\x1b\\', i + 2);
+                const ends = [endBell, endSt].filter((n) => n >= 0);
+                if (ends.length) {
+                    i = Math.min(...ends) + (Math.min(...ends) === endSt ? 2 : 1);
+                    continue;
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if (ch === '\r') {
+            col = 0;
+        } else if (ch === '\n') {
+            row = Math.min(rows.length - 1, row + 1);
+            col = 0;
+        } else if (ch.codePointAt(0) >= 0x20) {
+            setCell(ch);
+        }
+        i += ch.length;
+    }
+
+    return rows
+        .map((cells) => {
+            const lastIdx = cells.reduce((last, cell, index) => (
+                cell !== undefined && cell !== WIDE_PLACEHOLDER ? index : last
+            ), -1);
+            if (lastIdx < 0) return '';
+            let line = '';
+            for (let idx = 0; idx <= lastIdx; idx += 1) {
+                if (cells[idx] === WIDE_PLACEHOLDER) continue;
+                line += cells[idx] === undefined ? ' ' : cells[idx];
+            }
+            return line.trimEnd();
+        })
+        .filter((line) => line.trim())
+        .join('\n');
 }
 
 function splitLines(text) {
@@ -110,6 +230,9 @@ function isConfirmOptions(options) {
 }
 
 function parseOutputBlock(block) {
+    const rawCodexApproval = parseRawCodexApproval(block);
+    if (rawCodexApproval) return rawCodexApproval;
+
     const text = normalizeBlock(block);
     const trimmed = text.trim();
 
@@ -118,6 +241,9 @@ function parseOutputBlock(block) {
     }
 
     const lines = splitLines(trimmed);
+    const codexApproval = parseCodexApprovalScreen(lines, block);
+    if (codexApproval) return codexApproval;
+
     const question = extractQuestion(lines[0]);
     const remainingLines = lines.slice(1);
 
@@ -174,6 +300,83 @@ function parseOutputBlock(block) {
     }
 
     return { kind: 'none', confidence: 'low', rawBlock: block };
+}
+
+function parseRawCodexApproval(block) {
+    if (typeof block !== 'string' || !block.includes('\x1b')) return null;
+    const screen = renderTerminalScreen(block);
+    if (!screen) return null;
+    if (!/would you like to run the following command\?/i.test(screen)) return null;
+    if (!/yes,\s*proceed/i.test(screen)) return null;
+    if (!/press enter to confirm/i.test(screen)) return null;
+
+    const cleaned = screen;
+    const start = cleaned.search(/would you like to run the following command\?/i);
+    const end = cleaned.search(/press enter to confirm/i);
+    const rawQuestion = (start >= 0
+        ? cleaned.slice(start, end > start ? end : start + 2000)
+        : screen || 'Codex is requesting approval.');
+    const question = rawQuestion
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => line.replace(/^[$]\s*/, '$ '))
+        .slice(0, 16)
+        .join('\n');
+
+    return {
+        kind: 'approval',
+        confidence: 'high',
+        question: question || 'Codex is requesting approval.',
+        rawBlock: block,
+    };
+}
+
+function parseCodexApprovalScreen(lines, rawBlock) {
+    if (!Array.isArray(lines) || !lines.length) return null;
+    const joined = lines.join('\n');
+
+    let questionIdx = lines.findLastIndex((line) =>
+        /would you like to run the following command\?/i.test(line) ||
+        /would you like to proceed\?/i.test(line)
+    );
+    const relevant = questionIdx >= 0 ? lines.slice(questionIdx) : lines;
+    const relevantText = relevant.join('\n');
+    const hasYesProceed = /(?:^|[\s›>])1[.)、]\s*yes,\s*proceed\b/i.test(relevantText);
+    const hasNoOption = /(?:^|\s)3[.)、]\s*no,\s*and\b/i.test(relevantText) || /(?:^|\s)2[.)、]\s*no\b/i.test(relevantText);
+    const hasConfirmHint = /press enter to confirm/i.test(relevantText);
+    if (!hasYesProceed || !hasNoOption || !hasConfirmHint) return null;
+    if (questionIdx < 0) questionIdx = 0;
+
+    const detailLines = [];
+    let inCommand = false;
+    for (const line of relevant.slice(1)) {
+        if (/^\s*\d+[.)、]\s*/.test(line)) break;
+        if (/^reason:\s*/i.test(line)) {
+            detailLines.push(line);
+            continue;
+        }
+        if (line === '$' || line.startsWith('$')) {
+            inCommand = true;
+            detailLines.push(line);
+            continue;
+        }
+        if (inCommand || detailLines.length) {
+            detailLines.push(line);
+        }
+    }
+
+    const question = [lines[questionIdx] || joined, ...detailLines]
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+    return {
+        kind: 'approval',
+        confidence: 'high',
+        question,
+        rawBlock,
+    };
 }
 
 function parseExecutionSummary(block) {

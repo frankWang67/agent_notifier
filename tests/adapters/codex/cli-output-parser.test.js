@@ -162,6 +162,110 @@ test('parser detects approval prompt from fixture', () => {
   });
 });
 
+test('parser detects Codex TUI approval screen with cursor controls', () => {
+  const block = [
+    '\x1b[23;3H\x1b[1mWould you like to run the following command?\x1b[25;3H\x1b[22mReason:\x1b[25;11H需要查看服务日志。',
+    '\x1b[27;3H$\x1b[27;5Hjournalctl --user -u agent-notifier-codex-watcher -n 120 --no-pager',
+    '\x1b[29;1H\x1b[1m› 1. Yes, proceed (y)',
+    "\x1b[30;3H\x1b[22m2. Yes, and don't ask again for commands that start with `journalctl --user -u agent-notifier-codex-watcher` (p)",
+    '\x1b[31;3H3. No, and tell Codex what to do differently (esc)',
+    '\x1b[33;3H\x1b[2mPress enter to confirm or esc to cancel',
+  ].join('\n');
+
+  const parsed = parseOutputBlock(block);
+
+  assert.equal(parsed.kind, 'approval');
+  assert.equal(parsed.confidence, 'high');
+  assert.match(parsed.question, /Would you like to run the following command\?/);
+  assert.match(parsed.question, /Reason:/);
+  assert.match(parsed.question, /journalctl --user/);
+  assert.match(parsed.question, /command\?\nReason:/);
+  assert.match(parsed.question, /服务日志。\n\$ journalctl/);
+  assert.match(parsed.question, /2\. Yes, and don't ask again for commands that start with/);
+  assert.match(parsed.question, /3\. No, and tell Codex what to do differently/);
+});
+
+test('parser renders wide Chinese characters without inserting phantom spaces', () => {
+  const block = [
+    '\x1b[23;3H\x1b[1mWould you like to run the following command?',
+    '\x1b[25;3H\x1b[22mReason:',
+    '\x1b[25;11H需要确认中文空格渲染。',
+    '\x1b[27;3H$ echo ok',
+    '\x1b[29;1H\x1b[1m› 1. Yes, proceed (y)',
+    "\x1b[30;3H\x1b[22m2. Yes, and don't ask again for commands that start with `echo` (p)",
+    '\x1b[31;3H3. No, and tell Codex what to do differently (esc)',
+    '\x1b[33;3H\x1b[2mPress enter to confirm or esc to cancel',
+  ].join('\n');
+
+  const parsed = parseOutputBlock(block);
+
+  assert.equal(parsed.kind, 'approval');
+  assert.match(parsed.question, /Reason:\s*需要确认中文空格渲染。/);
+  assert.doesNotMatch(parsed.question, /需 要|确 认|中 文|空 格|渲 染/);
+});
+
+test('parser preserves spaces inside English approval options', () => {
+  const block = [
+    '\x1b[23;3H\x1b[1mWould you like to run the following command?',
+    '\x1b[27;3H$ npm run test',
+    "\x1b[29;1H\x1b[1m› 1. Yes, proceed (y)",
+    "\x1b[30;3H\x1b[22m2. Yes, and don't ask again for commands that start with `npm run test` (p)",
+    '\x1b[31;3H3. No, and tell Codex what to do differently (esc)',
+    '\x1b[33;3H\x1b[2mPress enter to confirm or esc to cancel',
+  ].join('\n');
+
+  const parsed = parseOutputBlock(block);
+
+  assert.equal(parsed.kind, 'approval');
+  assert.match(parsed.question, /2\. Yes, and don't ask again for commands that start with `npm run test`/);
+  assert.match(parsed.question, /3\. No, and tell Codex what to do differently/);
+});
+
+test('parser detects partial Codex TUI approval screen from rolling buffer', () => {
+  const block = [
+    "\x1b[29;1H\x1b[1m› 1. Yes, proceed (y)",
+    "\x1b[30;3H\x1b[22m2. Yes, and don't ask again for commands that start with `echo` (p)",
+    '\x1b[31;3H3. No, and tell Codex what to do differently (esc)',
+    '\x1b[33;3H\x1b[2mPress enter to confirm or esc to cancel',
+  ].join('\n');
+
+  const parsed = parseOutputBlock(block);
+
+  assert.equal(parsed.kind, 'approval');
+  assert.equal(parsed.confidence, 'high');
+  assert.match(parsed.question, /Yes, proceed/);
+});
+
+test('parser ignores historical approval options without active confirm hint', () => {
+  const block = [
+    'Earlier transcript:',
+    'Would you like to run the following command?',
+    '› 1. Yes, proceed (y)',
+    "2. Yes, and don't ask again for commands that start with `echo` (p)",
+    '3. No, and tell Codex what to do differently (esc)',
+    'Later assistant text continues here.',
+  ].join('\n');
+
+  const parsed = parseOutputBlock(block);
+
+  assert.equal(parsed.kind, 'none');
+});
+
+test('parser ignores raw historical approval when current rendered screen is idle', () => {
+  const block = [
+    '\x1b[23;3HWould you like to run the following command?',
+    '\x1b[27;3H$ echo old',
+    '\x1b[29;1H› 1. Yes, proceed (y)',
+    '\x1b[31;3H3. No, and tell Codex what to do differently (esc)',
+    '\x1b[33;3HPress enter to confirm or esc to cancel',
+    '\x1b[2J\x1b[1;1H› resumed session is idle',
+  ].join('\n');
+
+  const parsed = parseOutputBlock(block);
+
+  assert.equal(parsed.kind, 'none');
+});
+
 test('parser detects natural-language open question from fixture', () => {
   const parsed = parseOutputBlock(openQuestionFixture);
 

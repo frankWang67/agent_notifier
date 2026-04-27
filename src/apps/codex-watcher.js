@@ -76,6 +76,46 @@ function computeReadPlan({ prevOffset = 0, nextOffset = 0, prevMtimeMs = 0, next
     };
 }
 
+function computeChangedSuffix(previous, next) {
+    const oldText = String(previous || '');
+    const newText = String(next || '');
+    if (!oldText) return newText;
+    if (!newText) return '';
+    if (newText === oldText) return '';
+
+    let idx = 0;
+    const max = Math.min(oldText.length, newText.length);
+    while (idx < max && oldText.charCodeAt(idx) === newText.charCodeAt(idx)) {
+        idx += 1;
+    }
+    return newText.slice(idx);
+}
+
+function buildPromptSignature(parsed) {
+    const kind = String(parsed?.kind || 'none');
+    const question = String(parsed?.question || '');
+    if (kind !== 'approval') return `${kind}:${question}`;
+
+    const lines = question
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const command = lines.find((line) => line.startsWith('$ '));
+    if (command) return `${kind}:cmd:${command.replace(/\s+/g, ' ')}`;
+
+    const stable = lines
+        .filter((line) =>
+            /would you like to run the following command\?/i.test(line) ||
+            /^reason:/i.test(line) ||
+            /yes,\s*proceed/i.test(line) ||
+            /^3[.)]\s*no,/i.test(line)
+        )
+        .join('\n')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return `${kind}:${stable || question.replace(/\s+/g, ' ').trim()}`;
+}
+
 function buildStateKey(ptsNum) {
     return `feishu_codex_auto_${ptsNum}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -174,11 +214,18 @@ function buildCard(parsed, ptsDevice, stateKey) {
     };
     const title = titleMap[kind] || '⏸️ 等待操作';
 
-    const contentEls = question ? parseMarkdownToElements(question).map(el =>
-        el.tag === 'markdown'
-            ? { tag: 'div', text: { tag: 'lark_md', content: el.content } }
-            : el
-    ) : [];
+    const contentEls = [];
+    if (question) {
+        if (kind === 'approval' || kind === 'confirm') {
+            contentEls.push({ tag: 'div', text: { tag: 'plain_text', content: question } });
+        } else {
+            contentEls.push(...parseMarkdownToElements(question).map(el =>
+                el.tag === 'markdown'
+                    ? { tag: 'div', text: { tag: 'lark_md', content: el.content } }
+                    : el
+            ));
+        }
+    }
     const elements = [...contentEls];
 
     if (kind === 'approval') {
@@ -288,6 +335,7 @@ class CodexWatcher {
         this.timer = null;
         this._finalCardTimers = new Map();
         this._codexPtsSet = new Set();
+        this._lastApprovalSentAt = new Map();
     }
 
     async ensureChatId() {
@@ -440,10 +488,12 @@ class CodexWatcher {
         const ptsNum = filePath.replace(/^.*claude-pty-output-/, '');
         const ptsDevice = resolvePtsTarget(ptsNum);
 
-        // Prefer parsing the latest incremental chunk, then fall back to merged buffer.
-        // This avoids older terminal history masking newly emitted prompts.
-        let parsed = parseOutputBlock(chunkText);
-        if (!parsed || parsed.kind === 'none') {
+        // Prefer parsing only newly changed text. The pty relay rewrites a rolling
+        // screen buffer, so parsing the whole file would resend approval prompts
+        // from resumed scrollback/history.
+        const parseText = isFullReread ? computeChangedSuffix(old, chunkText) : chunkText;
+        let parsed = parseOutputBlock(parseText);
+        if ((!parsed || parsed.kind === 'none') && !isFullReread) {
             parsed = parseOutputBlock(merged);
         }
         if (!parsed || parsed.kind === 'none') {
@@ -453,8 +503,16 @@ class CodexWatcher {
         }
         if (!parsed.question || parsed.question.length < 3) return;
 
-        const signature = `${parsed.kind}:${parsed.question}`;
+        const signature = buildPromptSignature(parsed);
         if (this.signatures.get(ptsDevice) === signature) return;
+
+        if (parsed.kind === 'approval') {
+            const lastApprovalAt = this._lastApprovalSentAt.get(ptsDevice) || 0;
+            const approvalCooldownMs = parseInt(process.env.CODEX_APPROVAL_COOLDOWN_MS || '30000', 10);
+            if (Date.now() - lastApprovalAt < approvalCooldownMs) return;
+            this._lastApprovalSentAt.set(ptsDevice, Date.now());
+        }
+
         this.signatures.set(ptsDevice, signature);
 
         const stateKey = buildStateKey(ptsNum);
@@ -584,8 +642,10 @@ module.exports = {
     CodexWatcher,
     main,
     buildExecutionSummaryCard,
-    buildLiveSummaryCard,
-    buildCard,
-    computeReadPlan,
-    isCompletionLikeSummary,
+  buildLiveSummaryCard,
+  buildCard,
+  computeReadPlan,
+  computeChangedSuffix,
+  buildPromptSignature,
+  isCompletionLikeSummary,
 };

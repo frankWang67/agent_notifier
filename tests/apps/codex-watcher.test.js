@@ -7,6 +7,8 @@ const {
   buildCard,
   buildExecutionSummaryCard,
   buildLiveSummaryCard,
+  buildPromptSignature,
+  computeChangedSuffix,
   computeReadPlan,
   isCompletionLikeSummary,
 } = require('../../src/apps/codex-watcher');
@@ -32,6 +34,43 @@ test('computeReadPlan: first-seen file should not replay existing history', () =
   });
 
   assert.deepEqual(plan, { shouldRead: false, readOffset: 0, readLength: 0 });
+});
+
+test('computeChangedSuffix only returns newly changed tail for rewritten rolling buffer', () => {
+  const previous = [
+    'old transcript',
+    'Would you like to run the following command?',
+    '1. Yes, proceed',
+    'Press enter to confirm',
+  ].join('\n');
+  const next = `${previous}\nWorking`;
+
+  assert.equal(computeChangedSuffix(previous, next), '\nWorking');
+});
+
+test('buildPromptSignature keeps approval signature stable across animation noise', () => {
+  const a = buildPromptSignature({
+    kind: 'approval',
+    question: [
+      'Would you like to run the following command?',
+      'Reason: check service',
+      '$ journalctl --user -u agent-notifier-codex-watcher -n 20 --no-pager',
+      '› 1. Yes, proceed (y)',
+      'Working',
+    ].join('\n'),
+  });
+  const b = buildPromptSignature({
+    kind: 'approval',
+    question: [
+      'Would you like to run the following command?',
+      'Reason: check service',
+      '$ journalctl --user -u agent-notifier-codex-watcher -n 20 --no-pager',
+      '› 1. Yes, proceed (y)',
+      'Working 12s',
+    ].join('\n'),
+  });
+
+  assert.equal(a, b);
 });
 
 test('isCompletionLikeSummary: detects completion phrases', () => {
@@ -147,6 +186,17 @@ test('approval card: has allow (primary) and deny (danger) buttons', () => {
   assert.ok(denyBtn, '应有 deny 按钮');
   assert.equal(allowBtn.type, 'primary');
   assert.equal(denyBtn.type, 'danger');
+});
+
+test('approval card: renders question as plain text to preserve Chinese spacing', () => {
+  const card = buildCard(
+    { kind: 'approval', question: 'Reason: 需要确认中文空格渲染。\n$ echo ok', rawBlock: 'raw' },
+    '/dev/pts/3', 'key_001'
+  );
+  const questionEl = card.elements.find(el => el.tag === 'div' && el.text?.content?.includes('需要确认'));
+  assert.ok(questionEl);
+  assert.equal(questionEl.text.tag, 'plain_text');
+  assert.equal(questionEl.text.content.includes('需 要'), false);
 });
 
 test('approval card: has always-present text input row', () => {

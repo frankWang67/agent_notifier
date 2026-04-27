@@ -178,7 +178,7 @@ def main():
     # 终端输出缓冲文件（供 hook-handler 读取权限选项）
     output_log_path = f'/tmp/claude-pty-output-{pts_num}'
     output_buffer = bytearray()
-    OUTPUT_BUFFER_MAX = 4096
+    OUTPUT_BUFFER_MAX = 65536
     assistant_feed_path = '/tmp/codex-assistant-feed.jsonl'
     live_buffer_path = f'/tmp/codex-live-{pts_num}.jsonl'
     last_feed_ts = 0.0
@@ -202,16 +202,21 @@ def main():
         }
     else:
         capture = None
-    session_watcher_started = False
+    session_watcher_process = None
+    last_session_watcher_start = 0.0
 
     def maybe_start_session_watcher():
-        nonlocal session_watcher_started
-        if session_watcher_started:
+        nonlocal session_watcher_process, last_session_watcher_start
+        if session_watcher_process is not None and session_watcher_process.poll() is None:
             return
         if not capture or not capture.get('output'):
             return
+        now = time.time()
+        if now - last_session_watcher_start < 5.0:
+            return
+        last_session_watcher_start = now
         try:
-            subprocess.Popen(
+            session_watcher_process = subprocess.Popen(
                 ['node', os.path.join(install_dir, 'src/apps/codex-session-watcher.js'), '--pts', str(pts_num)],
                 cwd=install_dir,
                 env=os.environ.copy(),
@@ -219,9 +224,31 @@ def main():
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            session_watcher_started = True
         except Exception:
+            session_watcher_process = None
             pass
+
+    def stop_session_watcher():
+        nonlocal session_watcher_process
+        if session_watcher_process is None or session_watcher_process.poll() is not None:
+            return
+        try:
+            os.killpg(session_watcher_process.pid, signal.SIGTERM)
+        except Exception:
+            try:
+                session_watcher_process.terminate()
+            except Exception:
+                pass
+        try:
+            session_watcher_process.wait(timeout=2)
+        except Exception:
+            try:
+                os.killpg(session_watcher_process.pid, signal.SIGKILL)
+            except Exception:
+                try:
+                    session_watcher_process.kill()
+                except Exception:
+                    pass
 
     ansi_csi = re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]')
     ansi_osc = re.compile(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)')
@@ -323,6 +350,7 @@ def main():
 
     def save_output(chunk):
         nonlocal output_buffer, feed_lines, current_assistant_key
+        maybe_start_session_watcher()
         output_buffer.extend(chunk)
         if len(output_buffer) > OUTPUT_BUFFER_MAX:
             output_buffer = output_buffer[-OUTPUT_BUFFER_MAX:]
@@ -388,6 +416,7 @@ def main():
         pass
     finally:
         running = False
+        stop_session_watcher()
         # 恢复终端设置
         try:
             termios.tcsetattr(0, termios.TCSAFLUSH, orig_tty)

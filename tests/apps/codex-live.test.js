@@ -41,6 +41,10 @@ test('assistant key change creates new card', () => {
     shouldCreateNewCard({ assistantKey: 'a' }, { assistantKey: '' }),
     false
   );
+  assert.equal(
+    shouldCreateNewCard({ assistantKey: 'a' }, { assistantKey: 'a', phase: 'final_answer' }),
+    true
+  );
 });
 
 test('buildCodexLiveCard renders Claude-style summary card', () => {

@@ -386,11 +386,56 @@ function selectSessionCandidate(candidates, processInfo) {
     return sortedByMtime[0] || null;
 }
 
-function resolveSessionFileForPts(pts, rootDir = SESSIONS_ROOT) {
+function resolveSessionFileForPts(pts, rootDir = SESSIONS_ROOT, processInfo = readCodexProcessForPts(pts)) {
+    if (!processInfo) return null;
     const candidates = collectSessionCandidates(rootDir);
-    const processInfo = readCodexProcessForPts(pts);
     const selected = selectSessionCandidate(candidates, processInfo);
     return selected?.path || null;
+}
+
+function acquirePtsLock(pts) {
+    const lockPath = `/tmp/codex-session-watcher-${pts}.lock`;
+    const expectedArg = `--pts ${pts}`;
+
+    function readCmdline(pid) {
+        try {
+            return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim();
+        } catch {
+            return '';
+        }
+    }
+
+    function isLiveWatcher(pid) {
+        if (!/^\d+$/.test(String(pid || ''))) return false;
+        try {
+            process.kill(Number(pid), 0);
+        } catch {
+            return false;
+        }
+        const cmdline = readCmdline(pid);
+        return cmdline.includes('codex-session-watcher.js') && cmdline.includes(expectedArg);
+    }
+
+    function tryOpen() {
+        const fd = fs.openSync(lockPath, 'wx');
+        fs.writeFileSync(fd, String(process.pid));
+        return fd;
+    }
+
+    try {
+        return { lockPath, lockFd: tryOpen() };
+    } catch {
+        try {
+            const oldPid = String(fs.readFileSync(lockPath, 'utf8')).trim();
+            if (isLiveWatcher(oldPid)) {
+                return null;
+            }
+            fs.unlinkSync(lockPath);
+            return { lockPath, lockFd: tryOpen() };
+        } catch {
+            return null;
+        }
+    }
 }
 
 class CodexSessionWatcher {
@@ -479,7 +524,7 @@ class CodexSessionWatcher {
 
         fs.appendFileSync(this.liveBufferPath, JSON.stringify(payload) + '\n', 'utf8');
 
-        const child = spawn('node', [
+        const child = spawn(process.execPath, [
             path.join(this.installDir, 'src/apps/codex-live.js'),
             '--flush',
             this.liveBufferPath,
@@ -504,6 +549,29 @@ function main() {
     if (!pts) {
         throw new Error('需要 --pts');
     }
+    const lock = acquirePtsLock(pts);
+    if (!lock) {
+        process.exit(0);
+    }
+    const cleanupLock = () => {
+        try { fs.closeSync(lock.lockFd); } catch {}
+        try {
+            const currentPid = String(fs.readFileSync(lock.lockPath, 'utf8')).trim();
+            if (currentPid === String(process.pid)) {
+                fs.unlinkSync(lock.lockPath);
+            }
+        } catch {}
+    };
+    process.on('exit', cleanupLock);
+    process.on('SIGINT', () => {
+        cleanupLock();
+        process.exit(0);
+    });
+    process.on('SIGTERM', () => {
+        cleanupLock();
+        process.exit(0);
+    });
+
     const installDir = path.resolve(__dirname, '..', '..');
     const watcher = new CodexSessionWatcher({
         pts,
@@ -531,4 +599,5 @@ module.exports = {
     resolveSessionFileForPts,
     CodexSessionWatcher,
     extractLastTokenUsage,
+    acquirePtsLock,
 };

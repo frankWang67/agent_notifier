@@ -2,11 +2,14 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 
 const {
   parseSessionLine,
   recoverStateFromContent,
   selectSessionCandidate,
+  resolveSessionFileForPts,
+  acquirePtsLock,
 } = require('../../src/apps/codex-session-watcher');
 
 test('parseSessionLine tracks turn id from turn_context', () => {
@@ -229,4 +232,23 @@ test('selectSessionCandidate falls back to newest mtime when no match metadata',
     { cwd: '/repo/a', processStartMs: Date.now() }
   );
   assert.equal(selected.path, '/s/new.jsonl');
+});
+
+test('resolveSessionFileForPts returns null when the pts has no live Codex process', () => {
+  const selected = resolveSessionFileForPts('missing', __dirname, null);
+  assert.equal(selected, null);
+});
+
+test('acquirePtsLock replaces stale non-watcher lock and only owner cleans it', () => {
+  const pts = `test-${process.pid}`;
+  const lockPath = `/tmp/codex-session-watcher-${pts}.lock`;
+  try {
+    fs.writeFileSync(lockPath, 'not-a-live-pid', 'utf8');
+    const lock = acquirePtsLock(pts);
+    assert.ok(lock);
+    assert.equal(fs.readFileSync(lockPath, 'utf8'), String(process.pid));
+    fs.closeSync(lock.lockFd);
+  } finally {
+    try { fs.unlinkSync(lockPath); } catch {}
+  }
 });
