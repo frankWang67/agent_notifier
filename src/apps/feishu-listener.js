@@ -16,9 +16,78 @@ const { injectKeys, injectText } = require('../lib/terminal-inject');
 const { createFeishuClient } = require('../channels/feishu/feishu-client');
 const { createFeishuInteractionHandler } = require('../channels/feishu/feishu-interaction-handler');
 const { createCodexInputBridge } = require('../adapters/codex/cli-input-bridge');
+const { buildCardFooter } = require('../lib/card-footer');
 
 const WS_MAX_AGE_MS = parseInt(process.env.FEISHU_WS_MAX_AGE_MIN || '25', 10) * 60_000;
 const HEALTH_CHECK_INTERVAL_MS = 60_000;
+const RESTART_ON_STALE_WS = (
+    process.env.FEISHU_WS_RESTART_ON_STALE === '1' ||
+    process.env.FEISHU_WS_RESTART_ON_STALE === 'true' ||
+    !!process.env.INVOCATION_ID
+);
+
+/**
+ * Build a readable label for the response that was sent back to Codex.
+ * Args:
+ *   response: Unified Codex response produced from a Feishu card action.
+ * Return:
+ *   Human-readable response label for card confirmation.
+ */
+function formatCodexResponseLabel(response) {
+    if (!response) return '未知回复';
+    if (response.responseType === 'approve') return '允许 (y)';
+    if (response.responseType === 'reject') return '拒绝 (n)';
+    if (response.responseType === 'multi_select') {
+        const values = Array.isArray(response.values) ? response.values : [];
+        return values.length ? values.join(' ') : '多选提交';
+    }
+    if (response.value != null && String(response.value).trim()) {
+        return String(response.value).trim();
+    }
+    return response.responseType || '已操作';
+}
+
+/**
+ * Build a Feishu card that records the Codex reply after an interaction.
+ * Args:
+ *   response: Unified Codex response that was injected into the terminal.
+ *   notification: Stored notification metadata for the interaction.
+ * Return:
+ *   Feishu interactive card JSON showing the submitted response.
+ */
+function buildCodexReplyCard(response, notification) {
+    const responseLabel = formatCodexResponseLabel(response);
+    const ptsDevice = notification?.pts_device || null;
+    const now = new Date().toLocaleString('zh-CN', { hour12: false });
+    const elements = [
+        {
+            tag: 'div',
+            text: {
+                tag: 'lark_md',
+                content: [
+                    '**已回复 Codex**',
+                    `回复内容：\`${responseLabel.replace(/`/g, '\\`')}\``,
+                    `回传类型：${response?.responseType || 'unknown'}`,
+                    `时间：${now}`,
+                ].join('\n'),
+            },
+        },
+        buildCardFooter({
+            host: 'codex',
+            ptsDevice,
+            projectName: null,
+        }),
+    ];
+
+    return {
+        config: { wide_screen_mode: true },
+        header: {
+            title: { tag: 'plain_text', content: '✅ 已回复 Codex' },
+            template: 'green',
+        },
+        elements,
+    };
+}
 
 class FeishuListener {
     constructor() {
@@ -78,6 +147,21 @@ class FeishuListener {
                 return true;
             },
         });
+    }
+
+    /**
+     * Send a separate receipt card after a Codex reply has been injected.
+     * Args:
+     *   response: Unified Codex response that was injected into the terminal.
+     *   notification: Stored notification metadata for the interaction.
+     * Return:
+     *   Promise resolving after the receipt card is sent or skipped.
+     */
+    async sendCodexReplyReceipt(response, notification) {
+        const chatId = String(process.env.FEISHU_CHAT_ID || '').trim();
+        if (!chatId) return;
+        const card = buildCodexReplyCard(response, notification);
+        await this.feishuClient.sendCard({ chatId, card });
     }
 
     start() {
@@ -159,7 +243,10 @@ class FeishuListener {
             try {
                 const response = await this.unifiedInteractionHandler.handleCardAction(data);
                 if (!response) return;
-                return '已发送';
+                this.sendCodexReplyReceipt(response, notification).catch((err) => {
+                    console.error('[feishu-listener] 发送 Codex 回复确认卡失败:', err.message);
+                });
+                return `已回复：${formatCodexResponseLabel(response)}`;
             } catch (err) {
                 console.error('[feishu-listener] codex 回调处理失败:', err.message);
                 return '处理失败';
@@ -433,6 +520,11 @@ class FeishuListener {
             const info = this.wsClient.getReconnectInfo();
             const age = Date.now() - info.lastConnectTime;
             if (age > WS_MAX_AGE_MS) {
+                if (RESTART_ON_STALE_WS) {
+                    console.log(`[feishu-listener] WebSocket 连接已 ${Math.round(age / 60000)} 分钟未刷新，退出并交由服务管理器重启...`);
+                    this.stop();
+                    process.exit(0);
+                }
                 console.log(`[feishu-listener] WebSocket 连接已 ${Math.round(age / 60000)} 分钟未刷新，主动重连...`);
                 this.reconnect();
             }
@@ -460,6 +552,13 @@ class FeishuListener {
     stop() {
         if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
         if (this.cleanupInterval) clearInterval(this.cleanupInterval);
+        if (this.wsClient) {
+            try {
+                this.wsClient.close();
+            } catch (err) {
+                console.error('[feishu-listener] 关闭 WebSocket 失败:', err.message);
+            }
+        }
         console.log('[feishu-listener] 监听器已停止');
     }
 
@@ -483,4 +582,4 @@ function main() {
     return listener;
 }
 
-module.exports = { FeishuListener, main };
+module.exports = { FeishuListener, main, buildCodexReplyCard, formatCodexResponseLabel };

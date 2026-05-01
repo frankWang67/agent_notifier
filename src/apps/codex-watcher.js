@@ -352,7 +352,10 @@ class CodexWatcher {
     _refreshCodexPtsSet() {
         try {
             const { execSync } = require('child_process');
-            const out = execSync("ps -eo tty,args 2>/dev/null | grep -i codex | grep -v grep | grep -v watcher | grep -v 'vscode'", {
+            const userFilter = typeof process.getuid === 'function'
+                ? `-u ${process.getuid()}`
+                : '';
+            const out = execSync(`ps ${userFilter} -o tty,args 2>/dev/null | grep -i codex | grep -v grep | grep -v watcher | grep -v 'vscode'`, {
                 encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
             });
             const pts = new Set();

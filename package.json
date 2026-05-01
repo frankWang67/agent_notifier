@@ -8,6 +8,7 @@
     "test:core": "node --test tests/core/**/*.test.js",
     "test:adapters": "node --test tests/adapters/**/*.test.js",
     "test:portable": "npx -y node@22.14.0 --test tests/**/*.test.js",
+    "services:stop": "bash stop-services.sh",
     "feishu-listener": "node feishu-listener.js",
     "feishu-listener:start": "nohup node feishu-listener.js >> feishu-listener.log 2>&1 & echo $! > feishu-listener.pid && echo 'Feishu listener started (PID: '$(cat feishu-listener.pid)')'",
     "feishu-listener:stop": "if [ -f feishu-listener.pid ]; then kill $(cat feishu-listener.pid) 2>/dev/null; rm feishu-listener.pid; echo 'Feishu listener stopped'; else echo 'No PID file found'; fi",
