@@ -20,6 +20,7 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const { createTerminalInjector } = require('../core/terminal-injector');
 const { createTerminalRouter } = require('../core/terminal-router');
+const { fifoPath } = require('./runtime-paths');
 
 // ── Shell 引用辅助 ──────────────────────────────────────────
 
@@ -72,10 +73,10 @@ function resolveTarget() {
 
         // 策略 4: 检查是否有 FIFO 中继（relay.js）
         const ptsNum = ptsDevice.replace('/dev/pts/', '');
-        const fifoPath = `/tmp/agent-inject-pts${ptsNum}`;
+        const targetFifoPath = fifoPath(ptsNum);
         try {
-            const stat = fs.statSync(fifoPath);
-            if (stat.isFIFO()) return { type: 'fifo', target: fifoPath };
+            const stat = fs.statSync(targetFifoPath);
+            if (stat.isFIFO()) return { type: 'fifo', target: targetFifoPath };
         } catch {}
 
         // 先回到 pts（TIOCSTI 直接调用，可能被拒绝）
@@ -200,10 +201,10 @@ async function injectKeys(target, keys) {
     if (target.type === 'pts') {
         // 先检查 FIFO 中继
         const ptsNum = target.target.replace('/dev/pts/', '');
-        const fifoPath = `/tmp/agent-inject-pts${ptsNum}`;
+        const targetFifoPath = fifoPath(ptsNum);
         try {
-            if (fs.statSync(fifoPath).isFIFO()) {
-                return injectViaFifo(fifoPath, keys);
+            if (fs.statSync(targetFifoPath).isFIFO()) {
+                return injectViaFifo(targetFifoPath, keys);
             }
         } catch {}
 

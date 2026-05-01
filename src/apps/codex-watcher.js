@@ -9,16 +9,17 @@ const { parseOutputBlock } = require('../adapters/codex/cli-output-parser');
 const { sessionState } = require('../lib/session-state');
 const { parseMarkdownToElements } = require('../lib/feishu-card-utils');
 const { buildCardFooter } = require('../lib/card-footer');
+const { getRuntimeDir, fifoPath } = require('../lib/runtime-paths');
 
-const TMP_DIR = '/tmp';
+const TMP_DIR = getRuntimeDir();
 const OUTPUT_PREFIX = 'claude-pty-output-';
 const POLL_MS = 1500;
 
 /** 根据 pts 编号解析注入目标：FIFO 优先，否则使用裸 pts */
 function resolvePtsTarget(ptsNum) {
-    const fifoPath = `/tmp/agent-inject-pts${ptsNum}`;
+    const targetFifoPath = fifoPath(ptsNum);
     try {
-        if (fs.statSync(fifoPath).isFIFO()) return `fifo:${fifoPath}`;
+        if (fs.statSync(targetFifoPath).isFIFO()) return `fifo:${targetFifoPath}`;
     } catch {}
     return `/dev/pts/${ptsNum}`;
 }
@@ -418,7 +419,7 @@ class CodexWatcher {
     async start() {
         const chatId = await this.ensureChatId();
         if (!chatId) {
-            throw new Error('需要 FEISHU_CHAT_ID（或应用可读取到至少一个 chat）');
+            throw new Error('需要 FEISHU_CHAT_ID');
         }
 
         // 检测当前哪些 pts 运行着 Codex 进程
