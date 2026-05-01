@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 require('../lib/env-config'); // 加载 .env
 const { buildCardFooter } = require('../lib/card-footer');
+const { claudeLiveBufferPath } = require('../lib/runtime-paths');
 
 const KEY_TOOLS = new Set(['Bash', 'Write', 'Edit', 'NotebookEdit']);
 
@@ -165,7 +166,7 @@ async function main() {
     if (!KEY_TOOLS.has(toolName)) return;
 
     const sessionId = data.session_id || 'unknown';
-    const bufferPath = `/tmp/claude-live-${sessionId.slice(0, 8)}.jsonl`;
+    const bufferPath = claudeLiveBufferPath(sessionId);
 
     const entry = {
         tool: toolName,
@@ -246,15 +247,8 @@ async function flushBuffer(bufferPath) {
     const Lark = require('@larksuiteoapi/node-sdk');
     const client = new Lark.Client({ appId, appSecret });
 
-    let chatId = process.env.FEISHU_CHAT_ID;
-    if (!chatId) {
-        try {
-            const resp = await client.im.chat.list({ params: { page_size: 5 } });
-            const chats = resp?.data?.items || [];
-            if (!chats.length) return;
-            chatId = chats[0].chat_id;
-        } catch { return; }
-    }
+    const chatId = String(process.env.FEISHU_CHAT_ID || '').trim();
+    if (!chatId) return;
 
     // ── 加载 session state，合并已有 entries ──────────────────────────────────
     const { sessionState } = require('../lib/session-state');

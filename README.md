@@ -94,7 +94,7 @@ Edit `.env` (automatically created from `.env.example` on first install):
 ```bash
 FEISHU_APP_ID=your_app_id_here
 FEISHU_APP_SECRET=your_app_secret_here
-# FEISHU_CHAT_ID=
+FEISHU_CHAT_ID=your_chat_id_here
 ```
 
 > For step-by-step instructions on creating and approving a Feishu custom app, see [Feishu Setup Guide](#feishu-setup-guide) below.
@@ -187,7 +187,7 @@ journalctl --user -u agent-notifier-feishu -f
 # Feishu custom app
 FEISHU_APP_ID=your_app_id_here
 FEISHU_APP_SECRET=your_app_secret_here
-# FEISHU_CHAT_ID=
+FEISHU_CHAT_ID=your_chat_id_here
 
 # Default host (optional)
 # DEFAULT_AGENT_HOST=claude

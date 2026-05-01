@@ -94,7 +94,7 @@ cd agent_notifier
 ```bash
 FEISHU_APP_ID=your_app_id_here
 FEISHU_APP_SECRET=your_app_secret_here
-# FEISHU_CHAT_ID=
+FEISHU_CHAT_ID=your_chat_id_here
 ```
 
 > 飞书自建应用创建和审批流程见下方[飞书配置步骤](#飞书配置步骤)。
@@ -187,7 +187,7 @@ journalctl --user -u agent-notifier-feishu -f
 # 飞书自建应用
 FEISHU_APP_ID=your_app_id_here
 FEISHU_APP_SECRET=your_app_secret_here
-# FEISHU_CHAT_ID=
+FEISHU_CHAT_ID=your_chat_id_here
 
 # 默认宿主（可选）
 # DEFAULT_AGENT_HOST=claude

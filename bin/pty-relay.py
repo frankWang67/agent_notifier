@@ -16,7 +16,7 @@ PTY 代理中继 — 非 tmux 环境下的终端输入注入方案
     1. 创建 pty pair (master/slave)
     2. 在 slave 端启动 shell，relay 持有 master fd
     3. 代理终端 <-> pty master 的所有 I/O
-    4. 创建 FIFO: /tmp/agent-inject-pts{N}，监听注入指令
+    4. 创建用户隔离 FIFO: /tmp/agent-notifier-<uid>/agent-inject-pts{N}，监听注入指令
     5. 收到注入指令后写入 master fd = 等效键盘输入
 
 可直接配合现有 hook-handler / feishu-listener 使用，
@@ -39,6 +39,17 @@ import json
 import re
 import subprocess
 from collections import deque
+
+
+def _runtime_dir():
+    configured = os.environ.get('AGENT_NOTIFIER_RUNTIME_DIR', '').strip()
+    runtime_dir = configured or os.path.join('/tmp', f'agent-notifier-{os.getuid()}')
+    try:
+        os.makedirs(runtime_dir, mode=0o700, exist_ok=True)
+        os.chmod(runtime_dir, 0o700)
+    except OSError:
+        pass
+    return runtime_dir
 
 
 # ── 加载 .env ──────────────────────────────────────────────
@@ -98,12 +109,13 @@ def main():
     master_fd, slave_fd = os.openpty()
     slave_name = os.ttyname(slave_fd)
     pts_num = slave_name.rsplit('/', 1)[-1]
+    runtime_dir = _runtime_dir()
 
     # 设置 slave 终端大小
     set_winsize(slave_fd, rows, cols)
 
     # 创建 FIFO
-    fifo_path = f'/tmp/agent-inject-pts{pts_num}'
+    fifo_path = os.path.join(runtime_dir, f'agent-inject-pts{pts_num}')
     try:
         os.unlink(fifo_path)
     except FileNotFoundError:
@@ -176,11 +188,11 @@ def main():
     signal.signal(signal.SIGWINCH, on_winch)
 
     # 终端输出缓冲文件（供 hook-handler 读取权限选项）
-    output_log_path = f'/tmp/claude-pty-output-{pts_num}'
+    output_log_path = os.path.join(runtime_dir, f'claude-pty-output-{pts_num}')
     output_buffer = bytearray()
     OUTPUT_BUFFER_MAX = 65536
-    assistant_feed_path = '/tmp/codex-assistant-feed.jsonl'
-    live_buffer_path = f'/tmp/codex-live-{pts_num}.jsonl'
+    assistant_feed_path = os.path.join(runtime_dir, 'codex-assistant-feed.jsonl')
+    live_buffer_path = os.path.join(runtime_dir, f'codex-live-{pts_num}.jsonl')
     last_feed_ts = 0.0
     last_feed_sig = ''
     feed_lines = []

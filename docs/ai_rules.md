@@ -163,7 +163,8 @@ Codex + 飞书联调至少需要这些进程在线：
 注意：
 
 - `send-codex-feishu-test-cards.js` 只负责交互卡，不生成 `execution_summary`
-- 要验证 Codex 实时摘要，应触发真实 session 输出，或向 `/tmp/codex-live-<pts>.jsonl` 写入受控测试数据
+- 要验证 Codex 实时摘要，应触发真实 session 输出，或向运行期目录中的 `codex-live-<pts>.jsonl` 写入受控测试数据；默认运行期目录为 `/tmp/agent-notifier-<uid>/`
+- 运行期目录按用户隔离，也存放 FIFO、PTY 输出、live buffer、lock 与 `session-state.json`，避免多用户服务器互相串通知
 
 ## 10. 提交原则
 

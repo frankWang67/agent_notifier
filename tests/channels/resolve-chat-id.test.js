@@ -14,7 +14,7 @@ test('resolveFeishuChatId: returns configured chat id directly', async () => {
   assert.equal(chatId, 'oc_configured');
 });
 
-test('resolveFeishuChatId: falls back to first chat when config missing', async () => {
+test('resolveFeishuChatId: does not guess a chat when config missing', async () => {
   const calls = [];
   const chatId = await resolveFeishuChatId({
     preferredChatId: '',
@@ -34,9 +34,8 @@ test('resolveFeishuChatId: falls back to first chat when config missing', async 
     },
   });
 
-  assert.equal(chatId, 'oc_first');
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], { params: { page_size: 5 } });
+  assert.equal(chatId, '');
+  assert.equal(calls.length, 0);
 });
 
 test('resolveFeishuChatId: returns empty string when no chats found', async () => {
