@@ -1,13 +1,13 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 const { createSessionStore } = require('../core/session-store');
 const { createCardStateStore } = require('../core/card-state-store');
+const { sessionStatePath } = require('./runtime-paths');
 
 class SessionState {
     constructor(statePath) {
-        this.statePath = statePath || path.join(__dirname, '..', 'session-state.json');
+        this.statePath = statePath || sessionStatePath();
         this.tmpPath = this.statePath + '.tmp';
         this.data = {};
     }

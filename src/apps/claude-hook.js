@@ -16,6 +16,7 @@ const { resolvePtsDevice } = require('../lib/terminal-inject');
 const Lark = require('@larksuiteoapi/node-sdk');
 const { parseMarkdownToElements } = require('../lib/feishu-card-utils');
 const { buildCardFooter } = require('../lib/card-footer');
+const { ptyOutputPath } = require('../lib/runtime-paths');
 
 // ── 会话统计 ─────────────────────────────────────────────
 
@@ -253,15 +254,8 @@ async function getFeishuAppClient() {
 
     const client = new Lark.Client({ appId, appSecret });
 
-    let chatId = process.env.FEISHU_CHAT_ID;
-    if (!chatId) {
-        try {
-            const resp = await client.im.chat.list({ params: { page_size: 5 } });
-            const chats = resp?.data?.items || [];
-            if (chats.length === 0) return null;
-            chatId = chats[0].chat_id;
-        } catch { return null; }
-    }
+    const chatId = String(process.env.FEISHU_CHAT_ID || '').trim();
+    if (!chatId) return null;
 
     return { client, chatId };
 }
@@ -431,7 +425,7 @@ async function sendFeishuInteractiveCard(data, stats) {
             const ptsDevice = resolvePtsDevice(process.ppid);
             const ptsMatch = ptsDevice?.match(/pts(\d+)/);
             if (ptsMatch) {
-                const outputPath = `/tmp/claude-pty-output-${ptsMatch[1]}`;
+                const outputPath = ptyOutputPath(ptsMatch[1]);
                 if (fs.existsSync(outputPath)) {
                     const rawOutput = fs.readFileSync(outputPath, 'utf8');
                     // 去掉 ANSI 转义码（颜色、光标移动等），再解析选项

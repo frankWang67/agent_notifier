@@ -94,15 +94,8 @@ async function getFeishuAppClient() {
 
     const client = new Lark.Client({ appId, appSecret });
 
-    let chatId = process.env.FEISHU_CHAT_ID;
-    if (!chatId) {
-        try {
-            const resp = await client.im.chat.list({ params: { page_size: 5 } });
-            const chats = resp?.data?.items || [];
-            if (chats.length === 0) return null;
-            chatId = chats[0].chat_id;
-        } catch { return null; }
-    }
+    const chatId = String(process.env.FEISHU_CHAT_ID || '').trim();
+    if (!chatId) return null;
 
     return { client, chatId };
 }

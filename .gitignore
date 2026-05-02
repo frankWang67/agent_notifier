@@ -54,3 +54,4 @@ docs/*
 !docs/blog
 
 .codex
+temp/

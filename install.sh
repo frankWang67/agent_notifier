@@ -229,8 +229,8 @@ fi
 
 echo ""
 
-# ── 6. 配置并启动飞书监听器服务 ──────────────────────────
-info "正在配置飞书监听器服务..."
+# ── 6. 配置并启动常驻服务 ────────────────────────────────
+info "正在配置通知常驻服务..."
 
 FEISHU_APP_ID=""
 if [ -f "$INSTALL_DIR/.env" ]; then
@@ -238,27 +238,43 @@ if [ -f "$INSTALL_DIR/.env" ]; then
 fi
 
 NODE_BIN=$(command -v node)
-PLIST_LABEL="com.agent-notifier.feishu-listener"
-PLIST_FILE="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
-SYSTEMD_SERVICE="agent-notifier-feishu.service"
-SYSTEMD_FILE="$HOME/.config/systemd/user/$SYSTEMD_SERVICE"
-CRON_MARKER="# agent-notifier-feishu"
+FEISHU_PLIST_LABEL="com.agent-notifier.feishu-listener"
+FEISHU_PLIST_FILE="$HOME/Library/LaunchAgents/${FEISHU_PLIST_LABEL}.plist"
+CODEX_PLIST_LABEL="com.agent-notifier.codex-watcher"
+CODEX_PLIST_FILE="$HOME/Library/LaunchAgents/${CODEX_PLIST_LABEL}.plist"
+FEISHU_SYSTEMD_SERVICE="agent-notifier-feishu.service"
+FEISHU_SYSTEMD_FILE="$HOME/.config/systemd/user/$FEISHU_SYSTEMD_SERVICE"
+CODEX_SYSTEMD_SERVICE="agent-notifier-codex-watcher.service"
+CODEX_SYSTEMD_FILE="$HOME/.config/systemd/user/$CODEX_SYSTEMD_SERVICE"
+FEISHU_CRON_MARKER="# agent-notifier-feishu"
+CODEX_CRON_MARKER="# agent-notifier-codex-watcher"
 
-start_service() {
-    if [[ "$OSTYPE" == darwin* ]]; then
-        # ── macOS: launchd ──
-        mkdir -p "$HOME/Library/LaunchAgents"
-        cat > "$PLIST_FILE" <<PLISTEOF
+# Writes a launchd plist for one long-running notifier process.
+# Args:
+#   $1: Launchd label.
+#   $2: Absolute plist file path.
+#   $3: Absolute JavaScript entry file path.
+#   $4: Absolute log file path.
+#   $5: Optional stale WebSocket restart flag, use "1" for Feishu listener.
+# Return:
+#   Writes the plist file and returns the shell redirection status.
+write_launchd_plist() {
+    local label="$1"
+    local plist_file="$2"
+    local script_path="$3"
+    local log_path="$4"
+    local restart_on_stale_ws="${5:-0}"
+    cat > "$plist_file" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>${PLIST_LABEL}</string>
+    <string>${label}</string>
     <key>ProgramArguments</key>
     <array>
         <string>${NODE_BIN}</string>
-        <string>${INSTALL_DIR}/feishu-listener.js</string>
+        <string>${script_path}</string>
     </array>
     <key>WorkingDirectory</key>
     <string>${INSTALL_DIR}</string>
@@ -266,20 +282,72 @@ start_service() {
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>FEISHU_WS_RESTART_ON_STALE</key>
+        <string>${restart_on_stale_ws}</string>
+    </dict>
     <key>StandardOutPath</key>
-    <string>${INSTALL_DIR}/feishu-listener.log</string>
+    <string>${log_path}</string>
     <key>StandardErrorPath</key>
-    <string>${INSTALL_DIR}/feishu-listener.log</string>
+    <string>${log_path}</string>
 </dict>
 </plist>
 PLISTEOF
-        launchctl bootout "gui/$(id -u)" "$PLIST_FILE" 2>/dev/null || true
-        launchctl bootstrap "gui/$(id -u)" "$PLIST_FILE"
+}
+
+# Writes a systemd user service for one long-running notifier process.
+# Args:
+#   $1: Systemd service file path.
+#   $2: Human-readable service description.
+#   $3: Absolute JavaScript entry file path.
+#   $4: Optional stale WebSocket restart flag, use "1" for Feishu listener.
+# Return:
+#   Writes the service file and returns the shell redirection status.
+write_systemd_service() {
+    local service_file="$1"
+    local description="$2"
+    local script_path="$3"
+    local restart_on_stale_ws="${4:-0}"
+    cat > "$service_file" <<SVCEOF
+[Unit]
+Description=${description}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$NODE_BIN $script_path
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+Environment=NODE_ENV=production
+Environment=FEISHU_WS_RESTART_ON_STALE=${restart_on_stale_ws}
+
+[Install]
+WantedBy=default.target
+SVCEOF
+}
+
+start_service() {
+    if [[ "$OSTYPE" == darwin* ]]; then
+        # ── macOS: launchd ──
+        mkdir -p "$HOME/Library/LaunchAgents"
+        write_launchd_plist "$FEISHU_PLIST_LABEL" "$FEISHU_PLIST_FILE" "$INSTALL_DIR/feishu-listener.js" "$INSTALL_DIR/feishu-listener.log" "1"
+        write_launchd_plist "$CODEX_PLIST_LABEL" "$CODEX_PLIST_FILE" "$INSTALL_DIR/src/apps/codex-watcher.js" "$INSTALL_DIR/codex-watcher.log" "0"
+        launchctl bootout "gui/$(id -u)" "$FEISHU_PLIST_FILE" 2>/dev/null || true
+        launchctl bootout "gui/$(id -u)" "$CODEX_PLIST_FILE" 2>/dev/null || true
+        launchctl bootstrap "gui/$(id -u)" "$FEISHU_PLIST_FILE"
+        launchctl bootstrap "gui/$(id -u)" "$CODEX_PLIST_FILE"
         sleep 1
-        if launchctl print "gui/$(id -u)/${PLIST_LABEL}" &>/dev/null; then
-            success "飞书监听器已启动（launchd 服务，开机自启）"
+        if launchctl print "gui/$(id -u)/${FEISHU_PLIST_LABEL}" &>/dev/null &&
+           launchctl print "gui/$(id -u)/${CODEX_PLIST_LABEL}" &>/dev/null; then
+            success "飞书监听器与 Codex watcher 已启动（launchd 服务，开机自启）"
         else
-            error "飞书监听器启动失败，请检查 $INSTALL_DIR/feishu-listener.log"
+            error "常驻服务启动失败，请检查 $INSTALL_DIR/feishu-listener.log 与 $INSTALL_DIR/codex-watcher.log"
         fi
     else
         # ── Linux: 优先 systemd，回退 crontab + nohup ──
@@ -288,36 +356,24 @@ PLISTEOF
         if systemctl --user is-system-running &>/dev/null 2>&1; then
             # systemd 可用
             mkdir -p "$HOME/.config/systemd/user"
-            cat > "$SYSTEMD_FILE" <<SVCEOF
-[Unit]
-Description=Agent Notifier - Feishu Listener
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$NODE_BIN $INSTALL_DIR/feishu-listener.js
-Restart=always
-RestartSec=5
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=default.target
-SVCEOF
+            write_systemd_service "$FEISHU_SYSTEMD_FILE" "Agent Notifier - Feishu Listener" "$INSTALL_DIR/feishu-listener.js" "1"
+            write_systemd_service "$CODEX_SYSTEMD_FILE" "Agent Notifier - Codex Watcher" "$INSTALL_DIR/src/apps/codex-watcher.js" "0"
             systemctl --user daemon-reload
-            systemctl --user enable "$SYSTEMD_SERVICE"
-            systemctl --user restart "$SYSTEMD_SERVICE"
+            systemctl --user enable "$FEISHU_SYSTEMD_SERVICE"
+            systemctl --user enable "$CODEX_SYSTEMD_SERVICE"
+            systemctl --user restart "$FEISHU_SYSTEMD_SERVICE"
+            systemctl --user restart "$CODEX_SYSTEMD_SERVICE"
             sleep 1
-            if systemctl --user is-active "$SYSTEMD_SERVICE" &>/dev/null; then
-                success "飞书监听器已启动（systemd 服务，开机自启）"
+            if systemctl --user is-active "$FEISHU_SYSTEMD_SERVICE" &>/dev/null &&
+               systemctl --user is-active "$CODEX_SYSTEMD_SERVICE" &>/dev/null; then
+                success "飞书监听器与 Codex watcher 已启动（systemd 服务，开机自启）"
             else
-                error "飞书监听器启动失败，请检查: journalctl --user -u $SYSTEMD_SERVICE"
+                error "常驻服务启动失败，请检查: journalctl --user -u $FEISHU_SYSTEMD_SERVICE -u $CODEX_SYSTEMD_SERVICE"
             fi
             info "服务管理："
-            echo "  查看状态: systemctl --user status $SYSTEMD_SERVICE"
-            echo "  查看日志: journalctl --user -u $SYSTEMD_SERVICE -f"
-            echo "  重启服务: systemctl --user restart $SYSTEMD_SERVICE"
+            echo "  查看状态: systemctl --user status $FEISHU_SYSTEMD_SERVICE $CODEX_SYSTEMD_SERVICE"
+            echo "  查看日志: journalctl --user -u $FEISHU_SYSTEMD_SERVICE -u $CODEX_SYSTEMD_SERVICE -f"
+            echo "  重启服务: systemctl --user restart $FEISHU_SYSTEMD_SERVICE $CODEX_SYSTEMD_SERVICE"
         else
             # systemd 不可用，回退到 crontab + nohup
             warn "systemd 用户会话不可用，使用 crontab @reboot 回退方案"
@@ -325,10 +381,14 @@ SVCEOF
             nohup "$NODE_BIN" "$INSTALL_DIR/feishu-listener.js" >> "$INSTALL_DIR/feishu-listener.log" 2>&1 &
             echo $! > "$INSTALL_DIR/feishu-listener.pid"
             success "飞书监听器已启动 (PID: $(cat "$INSTALL_DIR/feishu-listener.pid"))"
+            nohup "$NODE_BIN" "$INSTALL_DIR/src/apps/codex-watcher.js" >> "$INSTALL_DIR/codex-watcher.log" 2>&1 &
+            echo $! > "$INSTALL_DIR/codex-watcher.pid"
+            success "Codex watcher 已启动 (PID: $(cat "$INSTALL_DIR/codex-watcher.pid"))"
 
             # 注册 crontab @reboot（幂等）
-            CRON_CMD="@reboot cd $INSTALL_DIR && $NODE_BIN $INSTALL_DIR/feishu-listener.js >> $INSTALL_DIR/feishu-listener.log 2>&1 $CRON_MARKER"
-            ( crontab -l 2>/dev/null | grep -v "$CRON_MARKER"; echo "$CRON_CMD" ) | crontab -
+            FEISHU_CRON_CMD="@reboot cd $INSTALL_DIR && $NODE_BIN $INSTALL_DIR/feishu-listener.js >> $INSTALL_DIR/feishu-listener.log 2>&1 $FEISHU_CRON_MARKER"
+            CODEX_CRON_CMD="@reboot cd $INSTALL_DIR && $NODE_BIN $INSTALL_DIR/src/apps/codex-watcher.js >> $INSTALL_DIR/codex-watcher.log 2>&1 $CODEX_CRON_MARKER"
+            ( crontab -l 2>/dev/null | grep -v "$FEISHU_CRON_MARKER" | grep -v "$CODEX_CRON_MARKER"; echo "$FEISHU_CRON_CMD"; echo "$CODEX_CRON_CMD" ) | crontab -
             success "已注册 crontab @reboot 开机自启"
         fi
     fi

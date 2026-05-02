@@ -29,17 +29,31 @@ echo ""
 # ── 0. 停止并移除持久化服务 ─────────────────────────────
 info "正在停止持久化服务..."
 
-PLIST_LABEL="com.agent-notifier.feishu-listener"
-PLIST_FILE="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
-SYSTEMD_SERVICE="agent-notifier-feishu.service"
-SYSTEMD_FILE="$HOME/.config/systemd/user/$SYSTEMD_SERVICE"
-CRON_MARKER="# agent-notifier-feishu"
+FEISHU_PLIST_LABEL="com.agent-notifier.feishu-listener"
+FEISHU_PLIST_FILE="$HOME/Library/LaunchAgents/${FEISHU_PLIST_LABEL}.plist"
+CODEX_PLIST_LABEL="com.agent-notifier.codex-watcher"
+CODEX_PLIST_FILE="$HOME/Library/LaunchAgents/${CODEX_PLIST_LABEL}.plist"
+FEISHU_SYSTEMD_SERVICE="agent-notifier-feishu.service"
+FEISHU_SYSTEMD_FILE="$HOME/.config/systemd/user/$FEISHU_SYSTEMD_SERVICE"
+CODEX_SYSTEMD_SERVICE="agent-notifier-codex-watcher.service"
+CODEX_SYSTEMD_FILE="$HOME/.config/systemd/user/$CODEX_SYSTEMD_SERVICE"
+FEISHU_CRON_MARKER="# agent-notifier-feishu"
+CODEX_CRON_MARKER="# agent-notifier-codex-watcher"
 
 if [[ "$OSTYPE" == darwin* ]]; then
     # ── macOS: launchd ──
-    if [ -f "$PLIST_FILE" ]; then
-        launchctl bootout "gui/$(id -u)" "$PLIST_FILE" 2>/dev/null || true
-        rm -f "$PLIST_FILE"
+    removed_launchd=0
+    if [ -f "$FEISHU_PLIST_FILE" ]; then
+        launchctl bootout "gui/$(id -u)" "$FEISHU_PLIST_FILE" 2>/dev/null || true
+        rm -f "$FEISHU_PLIST_FILE"
+        removed_launchd=1
+    fi
+    if [ -f "$CODEX_PLIST_FILE" ]; then
+        launchctl bootout "gui/$(id -u)" "$CODEX_PLIST_FILE" 2>/dev/null || true
+        rm -f "$CODEX_PLIST_FILE"
+        removed_launchd=1
+    fi
+    if [ "$removed_launchd" -eq 1 ]; then
         success "已停止并移除 launchd 服务"
     else
         info "launchd 服务未安装，跳过"
@@ -48,19 +62,28 @@ else
     # ── Linux: systemd + crontab ──
     export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
-    if systemctl --user is-enabled "$SYSTEMD_SERVICE" &>/dev/null 2>&1; then
-        systemctl --user stop "$SYSTEMD_SERVICE" 2>/dev/null || true
-        systemctl --user disable "$SYSTEMD_SERVICE" 2>/dev/null || true
+    removed_systemd=0
+    if systemctl --user is-enabled "$FEISHU_SYSTEMD_SERVICE" &>/dev/null 2>&1; then
+        systemctl --user stop "$FEISHU_SYSTEMD_SERVICE" 2>/dev/null || true
+        systemctl --user disable "$FEISHU_SYSTEMD_SERVICE" 2>/dev/null || true
+        removed_systemd=1
+    fi
+    if systemctl --user is-enabled "$CODEX_SYSTEMD_SERVICE" &>/dev/null 2>&1; then
+        systemctl --user stop "$CODEX_SYSTEMD_SERVICE" 2>/dev/null || true
+        systemctl --user disable "$CODEX_SYSTEMD_SERVICE" 2>/dev/null || true
+        removed_systemd=1
+    fi
+    if [ "$removed_systemd" -eq 1 ]; then
         success "已停止并禁用 systemd 服务"
     else
         info "systemd 服务未安装，跳过"
     fi
-    rm -f "$SYSTEMD_FILE"
+    rm -f "$FEISHU_SYSTEMD_FILE" "$CODEX_SYSTEMD_FILE"
     systemctl --user daemon-reload 2>/dev/null || true
 
     # 清理 crontab @reboot 条目
-    if crontab -l 2>/dev/null | grep -q "$CRON_MARKER"; then
-        crontab -l 2>/dev/null | grep -v "$CRON_MARKER" | crontab -
+    if crontab -l 2>/dev/null | grep -q "agent-notifier-"; then
+        crontab -l 2>/dev/null | grep -v "$FEISHU_CRON_MARKER" | grep -v "$CODEX_CRON_MARKER" | crontab -
         success "已移除 crontab @reboot 条目"
     fi
 fi

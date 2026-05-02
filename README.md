@@ -94,7 +94,7 @@ Edit `.env` (automatically created from `.env.example` on first install):
 ```bash
 FEISHU_APP_ID=your_app_id_here
 FEISHU_APP_SECRET=your_app_secret_here
-# FEISHU_CHAT_ID=
+FEISHU_CHAT_ID=your_chat_id_here
 ```
 
 > For step-by-step instructions on creating and approving a Feishu custom app, see [Feishu Setup Guide](#feishu-setup-guide) below.
@@ -134,6 +134,16 @@ codex
 ---
 
 ## Uninstall
+
+To temporarily stop the Feishu listener and Codex watcher started by `install.sh`, while keeping hooks, shell functions, `.env`, and auto-start configuration:
+
+```bash
+bash stop-services.sh
+# or
+npm run services:stop
+```
+
+To fully uninstall and remove configuration:
 
 ```bash
 bash uninstall.sh
@@ -187,7 +197,7 @@ journalctl --user -u agent-notifier-feishu -f
 # Feishu custom app
 FEISHU_APP_ID=your_app_id_here
 FEISHU_APP_SECRET=your_app_secret_here
-# FEISHU_CHAT_ID=
+FEISHU_CHAT_ID=your_chat_id_here
 
 # Default host (optional)
 # DEFAULT_AGENT_HOST=claude
@@ -250,9 +260,18 @@ After publishing, add the bot to your target group chat.
 
 ### Install / Uninstall
 
+`install.sh` starts both the Feishu callback listener and the Codex interactive-card watcher:
+- Linux systemd user: `agent-notifier-feishu.service`, `agent-notifier-codex-watcher.service`
+- macOS launchd: `com.agent-notifier.feishu-listener`, `com.agent-notifier.codex-watcher`
+- Linux without systemd: nohup processes plus crontab `@reboot` entries
+
+`stop-services.sh` / `npm run services:stop` only stops these persistent services. It does not remove hooks, shell functions, `.env`, `node_modules`, or auto-start configuration.
+
 ```bash
-bash install.sh      # Install (auto-cleans old config → reinstalls)
-bash uninstall.sh    # Uninstall (stops services → cleans up config)
+bash install.sh          # Install (auto-cleans old config → reinstalls and starts services)
+bash stop-services.sh    # Stop persistent services while keeping installation config
+bash uninstall.sh        # Uninstall (stops services → cleans up config)
+npm run services:stop    # Same as bash stop-services.sh
 ```
 
 ### Feishu Listener (Manual)

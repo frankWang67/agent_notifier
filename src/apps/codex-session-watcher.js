@@ -5,6 +5,10 @@ const path = require('node:path');
 const { spawn, execSync } = require('node:child_process');
 
 require('../lib/env-config');
+const {
+    codexLiveBufferPath,
+    codexSessionWatcherLockPath,
+} = require('../lib/runtime-paths');
 
 const SESSIONS_ROOT = path.join(process.env.HOME || '', '.codex', 'sessions');
 const POLL_MS = 1000;
@@ -394,7 +398,7 @@ function resolveSessionFileForPts(pts, rootDir = SESSIONS_ROOT, processInfo = re
 }
 
 function acquirePtsLock(pts) {
-    const lockPath = `/tmp/codex-session-watcher-${pts}.lock`;
+    const lockPath = codexSessionWatcherLockPath(pts);
     const expectedArg = `--pts ${pts}`;
 
     function readCmdline(pid) {
@@ -577,7 +581,7 @@ function main() {
         pts,
         installDir,
         projectName: path.basename(process.cwd()),
-        liveBufferPath: `/tmp/codex-live-${pts}.jsonl`,
+        liveBufferPath: codexLiveBufferPath(pts),
     });
     watcher.start();
 }
@@ -600,4 +604,6 @@ module.exports = {
     CodexSessionWatcher,
     extractLastTokenUsage,
     acquirePtsLock,
+    codexLiveBufferPath,
+    codexSessionWatcherLockPath,
 };

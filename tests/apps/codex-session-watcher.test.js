@@ -10,6 +10,7 @@ const {
   selectSessionCandidate,
   resolveSessionFileForPts,
   acquirePtsLock,
+  codexSessionWatcherLockPath,
 } = require('../../src/apps/codex-session-watcher');
 
 test('parseSessionLine tracks turn id from turn_context', () => {
@@ -241,7 +242,7 @@ test('resolveSessionFileForPts returns null when the pts has no live Codex proce
 
 test('acquirePtsLock replaces stale non-watcher lock and only owner cleans it', () => {
   const pts = `test-${process.pid}`;
-  const lockPath = `/tmp/codex-session-watcher-${pts}.lock`;
+  const lockPath = codexSessionWatcherLockPath(pts);
   try {
     fs.writeFileSync(lockPath, 'not-a-live-pid', 'utf8');
     const lock = acquirePtsLock(pts);
