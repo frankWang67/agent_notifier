@@ -336,7 +336,6 @@ class CodexWatcher {
         this.timer = null;
         this._finalCardTimers = new Map();
         this._codexPtsSet = new Set();
-        this._lastApprovalSentAt = new Map();
     }
 
     async ensureChatId() {
@@ -509,13 +508,6 @@ class CodexWatcher {
 
         const signature = buildPromptSignature(parsed);
         if (this.signatures.get(ptsDevice) === signature) return;
-
-        if (parsed.kind === 'approval') {
-            const lastApprovalAt = this._lastApprovalSentAt.get(ptsDevice) || 0;
-            const approvalCooldownMs = parseInt(process.env.CODEX_APPROVAL_COOLDOWN_MS || '30000', 10);
-            if (Date.now() - lastApprovalAt < approvalCooldownMs) return;
-            this._lastApprovalSentAt.set(ptsDevice, Date.now());
-        }
 
         this.signatures.set(ptsDevice, signature);
 
