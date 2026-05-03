@@ -14,20 +14,30 @@ function createTerminalInjector({ injectText }) {
         throw new TypeError('createTerminalInjector requires injectText');
     }
 
+    async function sendLine(target, value) {
+        const text = value == null ? '' : String(value);
+        if (text) {
+            await injectText(target, text);
+        }
+        // 需要等文字先渲染到输入框，再发送 Enter 才能触发提交
+        await new Promise(r => setTimeout(r, 100));
+        return injectText(target, '\r');
+    }
+
     return {
         async deliver(response, target) {
             const normalized = normalizeResponse(response);
 
             if (normalized.responseType === 'text') {
-                return injectText(target, `${normalized.value}\r`);
+                return sendLine(target, normalized.value);
             }
 
             if (normalized.responseType === 'approve') {
-                return injectText(target, 'y\r');
+                return sendLine(target, 'y');
             }
 
             if (normalized.responseType === 'reject') {
-                return injectText(target, 'n\r');
+                return sendLine(target, 'n');
             }
 
             return null;
